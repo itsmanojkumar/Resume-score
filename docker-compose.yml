@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./Pyhton bakend resume
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./Pyhton bakend resume:/app
+    restart: always
+
+  frontend:
+    build:
+      context: ./Resume_score Frontend
+    ports:
+      - "3000:80"
+    restart: always
