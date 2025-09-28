@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment variables
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
+SECRET_KEY = os.getenv("SECRET_KEY", "d4f3e5c6a7b8c9d0e1f2a3b4c5d6e7f890123456789abcdef0123456789abcdef")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Postgresql@localhost/postgres")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")

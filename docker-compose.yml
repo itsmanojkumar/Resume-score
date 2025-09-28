@@ -1,18 +1,44 @@
-version: '3.8'
-
 services:
   backend:
     build:
-      context: ./Pyhton bakend resume
+      context: "./Pyhton bakend resume"
+      dockerfile: Dockerfile
+    container_name: backend
     ports:
       - "8000:8000"
     volumes:
-      - ./Pyhton bakend resume:/app
-    restart: always
+      - "./Pyhton bakend resume:/app"
+    environment:
+      - ENV=development
+      - GOOGLE_API_KEY=AIzaSyDtU9Iw6ioqyDyjOLBoduic0MX_sVleY1U
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/resumedb
+    depends_on:
+      - db
 
   frontend:
-    build:
-      context: ./Resume_score Frontend
+    build:  
+      context: "./Resume_score Frontend"
+      dockerfile: Dockerfile
+    container_name: frontend
     ports:
-      - "3000:80"
+      - "5173:5173"
+    volumes:
+      - "./Resume_score Frontend:/app"
+    environment:
+      - NODE_ENV=development
+
+  db:
+    image: postgres:15
+    container_name: resume-db
     restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resumedb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+   postgres_data:

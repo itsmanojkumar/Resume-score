@@ -1,20 +1,18 @@
-# Build Vite app
-FROM node:18 AS build
+# Use Debian-based Node to fix Vite crypto issue
+FROM node:20-bullseye-slim
 
 WORKDIR /app
+
+# Copy package files and install dependencies
 COPY package*.json ./
 RUN npm install
 
+# Copy all frontend code
 COPY . .
+
+# Build frontend
 RUN npm run build
 
-# Serve with Nginx
-FROM nginx:alpine
-
-# Copy build output
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# Expose port
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
+# Serve the built app
+EXPOSE 5173
+CMD ["npx", "serve", "-s", "dist", "-l", "5173"]
