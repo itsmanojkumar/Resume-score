@@ -108,7 +108,9 @@ const ResumeScoringSoftware: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // API base URL
-  const API_BASE: string = 'http://localhost:8000';
+  // const API_BASE: string = 'http://localhost:8000';
+  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+
 
   // Load user data on component mount
   useEffect(() => {
