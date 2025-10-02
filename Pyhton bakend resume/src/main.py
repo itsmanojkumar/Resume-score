@@ -95,7 +95,8 @@ app = FastAPI(title="ResumeAI Backend with Gemini & Razorpay", version="2.0.0", 
 # CORS middleware   
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # allow_origins=["*"],
+    allow_origins=["https://resume-score-skth.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
