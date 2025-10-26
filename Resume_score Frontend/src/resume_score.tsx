@@ -94,7 +94,7 @@ const ResumeScoringSoftware: React.FC = () => {
   const [scoreResult, setScoreResult] = useState<AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('upload');
   const [showPayment, setShowPayment] = useState<boolean>(false);
-  const [showAuth, setShowAuth] = useState<boolean>(false);
+  const [showAuth, setShowAuth] = useState<boolean>(true);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -109,7 +109,8 @@ const ResumeScoringSoftware: React.FC = () => {
 
   // API base URL
   // const API_BASE: string = 'http://localhost:8000';
-  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+  const API_BASE: string = 'https://resume-score-1.onrender.com';
+
 
 
   // Load user data on component mount
@@ -453,10 +454,10 @@ const ResumeScoringSoftware: React.FC = () => {
   );
 
   // Auth Modal
-  const AuthModal: React.FC = () => {
+  const AuthModal: React.FC = React.memo(() => {
     const handleFormSubmit = useCallback((e: React.FormEvent) => {
       e.preventDefault();
-      handleAuth();
+      // handleAuth();
     }, []);
 
     const handleInputChange = useCallback((field: keyof AuthForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -535,7 +536,6 @@ const ResumeScoringSoftware: React.FC = () => {
           <div className="flex flex-col space-y-3">
             <button
               type="submit"
-              onClick={handleAuth}
               disabled={!authForm.email || !authForm.password || (authMode === 'register' && !authForm.fullName)}
               className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -569,7 +569,7 @@ const ResumeScoringSoftware: React.FC = () => {
         </div>
       // </div>
     );
-  };
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
