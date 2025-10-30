@@ -456,17 +456,17 @@ const ResumeScoringSoftware: React.FC = () => {
 
   // Auth Modal
   const AuthModal: React.FC = () => {
-    const handleFormSubmit = useCallback((e: React.FormEvent) => {
+    const handleFormSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       // handleAuth();
-    }, []);
+    };
 
-    const handleInputChange = useCallback((field: keyof AuthForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleInputChange = (field: keyof AuthForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
       setAuthForm(prev => ({ 
         ...prev, 
         [field]: e.target.value 
       }));
-    },[]);
+    };
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
