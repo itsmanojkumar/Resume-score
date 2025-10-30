@@ -455,7 +455,7 @@ const ResumeScoringSoftware: React.FC = () => {
   );
 
   // Auth Modal
-  const AuthModal: React.FC = React.memo(() => {
+  const AuthModal: React.FC = () => {
     const handleFormSubmit = useCallback((e: React.FormEvent) => {
       e.preventDefault();
       // handleAuth();
@@ -570,7 +570,7 @@ const ResumeScoringSoftware: React.FC = () => {
         </div>
       // </div>
     );
-  });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
