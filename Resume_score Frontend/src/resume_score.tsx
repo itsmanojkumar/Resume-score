@@ -110,7 +110,7 @@ const ResumeScoringSoftware: React.FC = () => {
   // API base URL
   // const API_BASE: string = 'http://localhost:8000';
   // const API_BASE: string = 'https://resume-score-1.onrender.com';
-  const API_BASE: string = 'https://resume-score-skth.onrender.com';
+  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
 
 
 
