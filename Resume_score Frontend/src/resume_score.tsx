@@ -458,7 +458,7 @@ const ResumeScoringSoftware: React.FC = () => {
   const AuthModal: React.FC = () => {
     const handleFormSubmit = (e: React.FormEvent) => {
       e.preventDefault();
-      // handleAuth();
+      handleAuth();
     };
 
     const handleInputChange = (field: keyof AuthForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
