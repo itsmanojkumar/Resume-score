@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Star, CheckCircle, Crown, CreditCard, FileText, BarChart3, Target, Zap, Shield, ArrowRight, Briefcase, Users, TrendingUp, AlertCircle, RefreshCw, LogIn, UserPlus } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Star, CheckCircle, Crown, CreditCard, FileText, BarChart3, Target, Zap, Shield, ArrowRight, Briefcase, TrendingUp, AlertCircle, RefreshCw, LogIn, UserPlus, Currency } from 'lucide-react';
+import AuthModal from './AuthModal';
 
 // Type definitions
 interface User {
@@ -12,7 +13,6 @@ interface User {
   token: string | null;
   isAuthenticated: boolean;
 }
-
 
 interface SubscriptionPlan {
   id?: number;
@@ -30,7 +30,7 @@ interface CategoryScores {
   skills: number;
 }
 
- interface Suggestion {
+interface Suggestion {
   area: string;
   description: string;
   action: string;
@@ -42,15 +42,10 @@ interface AnalysisResult {
   ats_score: number | null;
   job_match_score: number | null;
   category_scores: CategoryScores | null;
-  // suggestions: string[] | null;
-
   suggestions: Suggestion[] | null;
-
- 
   premium_insights: string[] | null;
   processing_status: 'pending' | 'processing' | 'completed' | 'failed';
-} 
-
+}
 
 interface AuthForm {
   email: string;
@@ -73,19 +68,25 @@ interface AuthResponse {
 interface ScoreCircleProps {
   score: number;
   label: string;
-  color:string;
+  color: string;
 }
 
 type TabType = 'upload' | 'results' | 'pricing';
 type AuthMode = 'login' | 'register';
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 const ResumeScoringSoftware: React.FC = () => {
   const [user, setUser] = useState<User>({ 
     isPremium: false, 
     creditsRemaining: 100,
     subscription: null,
-    token: localStorage.getItem('token'),
-    isAuthenticated: !!localStorage.getItem('token')
+    token: null,
+    isAuthenticated: false
   });
   
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -94,7 +95,7 @@ const ResumeScoringSoftware: React.FC = () => {
   const [scoreResult, setScoreResult] = useState<AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('upload');
   const [showPayment, setShowPayment] = useState<boolean>(false);
-  const [showAuth, setShowAuth] = useState<boolean>(true);
+  const [showAuth, setShowAuth] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -107,20 +108,27 @@ const ResumeScoringSoftware: React.FC = () => {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // API base URL
-  // const API_BASE: string = 'http://localhost:8000';
-  // const API_BASE: string = 'https://resume-score-1.onrender.com';
-  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+  // API base URL and Razorpay Key
+  // const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+  const API_BASE: string ='http://localhost:8000';
+  const RAZORPAY_KEY: string = import.meta.env.VITE_RAZORPAY_KEY_ID; // Replace with your actual Razorpay key
 
-
-
-  // Load user data on component mount
+  // Load Razorpay script and user data
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      fetchUserData(token);
-    }
-  }, []);    
+    // Load Razorpay script
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    document.body.appendChild(script);
+    console.log("env id is ",import.meta.env.VITE_RAZORPAY_KEY_ID);
+
+    
+    return () => {
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
+    };
+  }, []);
 
   const fetchUserData = async (token: string): Promise<void> => {
     try {
@@ -132,18 +140,17 @@ const ResumeScoringSoftware: React.FC = () => {
       
       if (response.ok) {
         const userData = await response.json();
-        setUser(prev => ({
-          ...prev,
+        setUser({
           id: userData.id,
           email: userData.email,
           full_name: userData.full_name,
           isPremium: userData.is_premium,
           creditsRemaining: userData.credits_remaining,
+          subscription: null,
           token,
           isAuthenticated: true
-        }));
+        });
       } else {
-        localStorage.removeItem('token');
         setUser(prev => ({
           ...prev,
           token: null,
@@ -176,7 +183,6 @@ const ResumeScoringSoftware: React.FC = () => {
       if (response.ok) {
         if (authMode === 'login') {
           const authData: AuthResponse = data;
-          localStorage.setItem('token', authData.access_token);
           setUser({
             id: authData.user.id,
             email: authData.user.email,
@@ -188,7 +194,6 @@ const ResumeScoringSoftware: React.FC = () => {
             isAuthenticated: true
           });
         } else {
-          // For registration, auto-login
           const loginResponse = await fetch(`${API_BASE}/auth/login`, {
             method: 'POST',
             headers: {
@@ -199,7 +204,6 @@ const ResumeScoringSoftware: React.FC = () => {
           
           if (loginResponse.ok) {
             const loginData: AuthResponse = await loginResponse.json();
-            localStorage.setItem('token', loginData.access_token);
             setUser({
               id: loginData.user.id,
               email: loginData.user.email,
@@ -224,7 +228,6 @@ const ResumeScoringSoftware: React.FC = () => {
   };
 
   const logout = (): void => {
-    localStorage.removeItem('token');
     setUser({
       isPremium: false,
       creditsRemaining: 2,
@@ -251,11 +254,9 @@ const ResumeScoringSoftware: React.FC = () => {
           
           if (response.ok) {
             const result: AnalysisResult = await response.json();
-            console.log('Analysis result:', result); // Debug log
             
             if (result.processing_status === 'completed') {
               setScoreResult(result);
-              console.log('Final scoreResult set:', result); // Debug log
               setIsProcessing(false);
               setActiveTab('results');
             } else if (result.processing_status === 'failed') {
@@ -288,16 +289,12 @@ const ResumeScoringSoftware: React.FC = () => {
       const formData = new FormData();
       formData.append('file', uploadedFile);
       
-      // Add job description if provided
       if (jobDescription.trim()) {
         formData.append('job_description', jobDescription.trim());
       }
       
-      console.log('Uploading with job description:', jobDescription.trim()); // Debug log
-      
       const response = await fetch(`${API_BASE}/resume/analyze`, {
         method: 'POST',
-        
         headers: {
           'Authorization': `Bearer ${user.token}`
         },
@@ -310,11 +307,9 @@ const ResumeScoringSoftware: React.FC = () => {
       }
       
       const result = await response.json();
-      console.log('Upload result:', result); // Debug log
       setAnalysisId(result.id);
       setProcessingStatus('processing');
       
-      // Update user credits
       if (!user.isPremium) {
         setUser(prev => ({
           ...prev,
@@ -343,27 +338,111 @@ const ResumeScoringSoftware: React.FC = () => {
     setShowPayment(true);
   };
 
-  const processPayment = (): void => {
-    if (!selectedPlan) return;
+  const processPayment = async (): Promise<void> => {
+    if (!selectedPlan || !user.token) return;
     
-    // Simulate payment processing
-    setTimeout(() => {
-      setUser(prev => ({
-        ...prev,
-        isPremium: true,
-        creditsRemaining: selectedPlan.name === 'Pro' ? 50 : 999,
-        subscription: selectedPlan
-      }));
-      setShowPayment(false);
-      setSelectedPlan(null);
-      alert('Payment successful! Welcome to Premium!');
-    }, 1500);
+    try {
+      // Create order on backend
+      // const amount = parseFloat(selectedPlan.price.replace('$', '').replace('₹', '').replace('/month', '')) *100 ; // Convert to smallest currency unit
+      const price=parseInt(selectedPlan.price.replace(/\D/g, ''), 10);
+      const amount=price; // INR to paise
+      console.log(amount);
+      
+      const orderResponse = await fetch(`${API_BASE}/payment/create-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          plan_name: selectedPlan.name,
+          amount: amount,
+          currency:'INR'
+        })
+      });
+
+      if (!orderResponse.ok) {
+        throw new Error('Failed to create order');
+      }
+
+      const orderData = await orderResponse.json();
+
+      // Configure Razorpay options
+      const options = {
+        key: RAZORPAY_KEY,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'ResumeAI Pro',
+        description: `${selectedPlan.name} Plan Subscription`,
+        order_id: orderData.order_id,
+        handler: async function (response: any) {
+          try {
+            const verifyResponse = await fetch(`${API_BASE}/payment/verify`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${user.token}`
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                plan_name: selectedPlan.name
+              })
+            });
+
+            if (verifyResponse.ok) {
+              setUser(prev => ({
+                ...prev,
+                isPremium: true,
+                creditsRemaining: selectedPlan.name === 'Pro' ? 50 : 999,
+                subscription: selectedPlan
+              }));
+              
+              setShowPayment(false);
+              setSelectedPlan(null);
+              alert('Payment successful! Welcome to Premium!');
+            } else {
+              throw new Error('Payment verification failed');
+            }
+          } catch (error) {
+            console.error('Verification error:', error);
+            alert('Payment verification failed. Please contact support.');
+          }
+        },
+        prefill: {
+          email: user.email || '',
+          name: user.full_name || '',
+        },
+        theme: {
+          color: '#3B82F6'
+        },
+        method: {
+          upi: true,
+          card: true,
+          netbanking: true,
+          wallet: true
+        }
+      };
+
+      const razorpay = new window.Razorpay(options);
+      
+      razorpay.on('payment.failed', function (response: any) {
+        alert(`Payment failed: ${response.error.description}`);
+      });
+      
+      razorpay.open();
+      
+    } catch (error) {
+      console.error('Payment error:', error);
+      alert('Failed to initiate payment. Please try again.');
+    }
   };
 
   const plans: SubscriptionPlan[] = [
     {
       name: 'Pro',
-      price: '$9.99/month',
+      price: 'INR200/month',
       features: [
         '50 resume scans per month',
         'Advanced AI insights with Gemini',
@@ -377,7 +456,7 @@ const ResumeScoringSoftware: React.FC = () => {
     },
     {
       name: 'Enterprise',
-      price: '$29.99/month',
+      price: '500/month',
       features: [
         'Unlimited resume scans',
         'Advanced Gemini AI analysis',
@@ -392,15 +471,7 @@ const ResumeScoringSoftware: React.FC = () => {
     }
   ];
 
-  const ScoreCircle: React.FC<ScoreCircleProps> = ({ score, label, color = "blue" }) => {
-    const colorClasses = {
-      blue: "text-blue-500",
-      green: "text-green-500",
-      purple: "text-purple-500",
-      orange: "text-orange-500"
-      
-    };
-
+  const ScoreCircle: React.FC<ScoreCircleProps> = ({ score, label }) => {
     return (
       <div className="flex flex-col items-center">
         <div className="relative w-20 h-20">
@@ -454,124 +525,7 @@ const ResumeScoringSoftware: React.FC = () => {
     </div>
   );
 
-  // Auth Modal
-  const AuthModal: React.FC = () => {
-    const handleFormSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      handleAuth();
-    };
-
-    const handleInputChange = (field: keyof AuthForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
-      setAuthForm(prev => ({ 
-        ...prev, 
-        [field]: e.target.value 
-      }));
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
-          <div className="text-center mb-6">
-            {authMode === 'login' ? 
-              <LogIn className="h-12 w-12 text-blue-500 mx-auto mb-4" /> : 
-              <UserPlus className="h-12 w-12 text-green-500 mx-auto mb-4" />
-            }
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">
-              {authMode === 'login' ? 'Sign In' : 'Create Account'}
-            </h3>
-            <p className="text-gray-600">
-              {authMode === 'login' ? 'Welcome back! Please sign in to continue.' : 'Join us to start analyzing your resume with AI.'}
-            </p>
-          </div>
-
-          <form onSubmit={handleFormSubmit} className="space-y-4 mb-6">
-            {authMode === 'register' && (
-              <div>
-                <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name *
-                </label>
-                <input
-                  id="fullName"
-                  type="text"
-                  value={authForm.fullName}
-                  onChange={handleInputChange('fullName')}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter your full name"
-                  required={authMode === 'register'}
-                />
-              </div>
-            )}
-            
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email *
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={authForm.email}
-                onChange={handleInputChange('email')}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your email"
-                required
-                autoComplete="email"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password *
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={authForm.password}
-                onChange={handleInputChange('password')}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your password"
-                required
-                autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-              />
-            </div>
-
-          <div className="flex flex-col space-y-3">
-            <button
-              type="submit"
-              disabled={!authForm.email || !authForm.password || (authMode === 'register' && !authForm.fullName)}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {authMode === 'login' ? 'Sign In' : 'Create Account'}
-            </button>
-          </div>
-          </form>
-            
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode(authMode === 'login' ? 'register' : 'login');
-                setAuthForm({ email: '', password: '', fullName: '' });
-              }}
-              className="text-blue-600 hover:text-blue-700 text-sm"
-            >
-              {authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => {
-                setShowAuth(false);
-                setAuthForm({ email: '', password: '', fullName: '' });
-              }}
-              className="text-gray-500 hover:text-gray-700 text-sm"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      // </div>
-    );
-  };
-
+ 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
@@ -706,7 +660,7 @@ const ResumeScoringSoftware: React.FC = () => {
                 )}
               </div>
 
-              {/* Job Description (Optional) */}
+              {/* Job Description */}
               <div className="bg-white rounded-2xl shadow-xl p-6">
                 <div className="flex items-center space-x-2 mb-4">
                   <Briefcase className="h-5 w-5 text-purple-600" />
@@ -790,44 +744,26 @@ const ResumeScoringSoftware: React.FC = () => {
 
         {/* Results Tab */}
         {activeTab === 'results' && scoreResult && !isProcessing && (
-          console.log('Rendering results with scoreResult:', scoreResult) ,
           <div className="max-w-6xl mx-auto">
             <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-3xl font-bold text-gray-900">
                   Resume Analysis Results
-                </h2>   
+                </h2>
                 <div className="flex items-center space-x-2 text-sm text-green-600">
                   <CheckCircle className="h-4 w-4" />
                   <span>Analyzed by Gemini 1.5 Flash</span>
                 </div>
               </div>
-              
-              Main Scores
+
+              {/* Main Scores */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-                Overall Score
+                {/* Overall Score */}
                 <div className="text-center">
                   <div className="relative w-28 h-28 mx-auto mb-3">
                     <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        stroke="currentColor"
-                        strokeWidth="6"
-                        fill="transparent"
-                        className="text-gray-200"
-                      />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        stroke="currentColor"
-                        strokeWidth="6"
-                        fill="transparent"
-                        strokeDasharray={`${(scoreResult.overall_score || 0) * 2.51} 251`}
-                        className="text-blue-600"
-                      />
+                      <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-gray-200" />
+                      <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={`${(scoreResult.overall_score || 0) * 2.51} 251`} className="text-blue-600" />
                     </svg>
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="text-center">
@@ -843,25 +779,8 @@ const ResumeScoringSoftware: React.FC = () => {
                 <div className="text-center">
                   <div className="relative w-28 h-28 mx-auto mb-3">
                     <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        stroke="currentColor"
-                        strokeWidth="6"
-                        fill="transparent"
-                        className="text-gray-200"
-                      />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        stroke="currentColor"
-                        strokeWidth="6"
-                        fill="transparent"
-                        strokeDasharray={`${(scoreResult.ats_score || 0) * 2.51} 251`}
-                        className="text-green-600"
-                      />
+                      <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-gray-200" />
+                      <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={`${(scoreResult.ats_score || 0) * 2.51} 251`} className="text-green-600" />
                     </svg>
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="text-center">
@@ -878,25 +797,8 @@ const ResumeScoringSoftware: React.FC = () => {
                   <div className="text-center">
                     <div className="relative w-28 h-28 mx-auto mb-3">
                       <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="40"
-                          stroke="currentColor"
-                          strokeWidth="6"
-                          fill="transparent"
-                          className="text-gray-200"
-                        />
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="40"
-                          stroke="currentColor"
-                          strokeWidth="6"
-                          fill="transparent"
-                          strokeDasharray={`${scoreResult.job_match_score * 2.51} 251`}
-                          className="text-purple-600"
-                        />
+                        <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-gray-200" />
+                        <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={`${scoreResult.job_match_score * 2.51} 251`} className="text-purple-600" />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center">
                         <div className="text-center">
@@ -909,30 +811,13 @@ const ResumeScoringSoftware: React.FC = () => {
                   </div>
                 )}
 
-                {/* Industry Benchmark (Premium Feature) */}
+                {/* Industry Benchmark */}
                 {user.isPremium && (
                   <div className="text-center">
                     <div className="relative w-28 h-28 mx-auto mb-3">
                       <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="40"
-                          stroke="currentColor"
-                          strokeWidth="6"
-                          fill="transparent"
-                          className="text-gray-200"
-                        />
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="40"
-                          stroke="currentColor"
-                          strokeWidth="6"
-                          fill="transparent"
-                          strokeDasharray={`${85 * 2.51} 251`}
-                          className="text-orange-600"
-                        />
+                        <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-gray-200" />
+                        <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={`${85 * 2.51} 251`} className="text-orange-600" />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center">
                         <div className="text-center">
@@ -946,55 +831,6 @@ const ResumeScoringSoftware: React.FC = () => {
                 )}
               </div>
 
-              {/* ATS Details Section */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-8">
-                <div className="flex items-center space-x-3 mb-4">
-                  <div className="bg-green-100 p-2 rounded-full">
-                    <Target className="h-6 w-6 text-green-600" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-green-900">ATS Analysis Report</h3>
-                  <span className="bg-green-100 text-green-800 text-sm font-medium px-2.5 py-0.5 rounded">
-                    Score: {Math.round(scoreResult.ats_score || 0)}%
-                  </span>
-                </div>
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="font-semibold text-green-800 mb-3">ATS Compatibility Factors</h4>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-green-700">Keyword Density</span>
-                        <span className="font-medium text-green-800">{Math.round((scoreResult.category_scores?.keywords || 0))}%</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-700">Format Structure</span>
-                        <span className="font-medium text-green-800">{Math.round((scoreResult.category_scores?.formatting || 0))}%</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-700">Content Quality</span>
-                        <span className="font-medium text-green-800">{Math.round((scoreResult.category_scores?.content || 0))}%</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-green-800 mb-3">ATS Recommendations</h4>
-                    <ul className="space-y-2 text-green-700">
-                      <li className="flex items-start space-x-2">
-                        <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">Use standard section headers</span>
-                      </li>
-                      <li className="flex items-start space-x-2">
-                        <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">Include relevant industry keywords</span>
-                      </li>
-                      <li className="flex items-start space-x-2">
-                        <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">Avoid complex formatting elements</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
               {/* Category Scores */}
               <div className="mb-12">
                 <h3 className="text-xl font-semibold text-gray-900 mb-6">Category Breakdown</h3>
@@ -1003,8 +839,8 @@ const ResumeScoringSoftware: React.FC = () => {
                     <ScoreCircle
                       key={category}
                       score={score}
-                      label={category.charAt(0).toUpperCase() + category.slice(1)}  
-                      color={category === 'keywords' ? 'blue' : category === 'formatting' ? 'green' : category === 'content' ? 'purple' : 'orange'}
+                      label={category.charAt(0).toUpperCase() + category.slice(1)}
+                      color="blue"
                     />
                   ))}
                 </div>
@@ -1017,10 +853,12 @@ const ResumeScoringSoftware: React.FC = () => {
                   {(scoreResult.suggestions || []).map((suggestion, index) => (
                     <div key={index} className="flex items-start space-x-3 p-4 bg-blue-50 rounded-lg">
                       <ArrowRight className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                      <span className="text-gray-700">{suggestion.area}</span>
-                      <span className="text-gray-700">{suggestion.description}</span>
-                      <span className="text-gray-700">{suggestion.action}</span>
-                    </div>  
+                      <div>
+                        <div className="font-semibold text-gray-900">{suggestion.area}</div>
+                        <div className="text-gray-700">{suggestion.description}</div>
+                        <div className="text-blue-600 text-sm mt-1">{suggestion.action}</div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1039,57 +877,6 @@ const ResumeScoringSoftware: React.FC = () => {
                         <span className="text-purple-800">{insight}</span>
                       </div>
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Job Match Analysis */}
-              {scoreResult.job_match_score !== null && scoreResult.job_match_score !== undefined && (
-                <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-6 mb-8">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="bg-purple-100 p-2 rounded-full">
-                      <Briefcase className="h-6 w-6 text-purple-600" />
-                    </div>
-                    <h3 className="text-xl font-semibold text-purple-900">Job Description Match Analysis</h3>
-                    <span className="bg-purple-100 text-purple-800 text-sm font-medium px-2.5 py-0.5 rounded">
-                      Match: {Math.round(scoreResult.job_match_score)}%
-                    </span>
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <h4 className="font-semibold text-purple-800 mb-3">Alignment Strengths</h4>
-                      <ul className="space-y-2 text-purple-700">
-                        <li className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Strong skill match with job requirements</span>
-                        </li>
-                        <li className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Relevant experience level</span>
-                        </li>
-                        <li className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Industry-specific keywords present</span>
-                        </li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-blue-800 mb-3">Areas for Improvement</h4>
-                      <ul className="space-y-2 text-blue-700">
-                        <li className="flex items-start space-x-2">
-                          <ArrowRight className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Add more specific technical skills mentioned in job posting</span>
-                        </li>
-                        <li className="flex items-start space-x-2">
-                          <ArrowRight className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Include quantifiable achievements related to job requirements</span>
-                        </li>
-                        <li className="flex items-start space-x-2">
-                          <ArrowRight className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">Align language with job description terminology</span>
-                        </li>
-                      </ul>
-                    </div>
                   </div>
                 </div>
               )}
@@ -1142,7 +929,7 @@ const ResumeScoringSoftware: React.FC = () => {
                       </span>
                     </div>
                   )}
-                  
+
                   <div className="text-center mb-8">
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h3>
                     <p className="text-4xl font-bold text-blue-600">{plan.price}</p>
@@ -1188,9 +975,19 @@ const ResumeScoringSoftware: React.FC = () => {
       </div>
 
       {/* Auth Modal */}
-      {showAuth && <AuthModal />}
+      {showAuth && (
+    <AuthModal
+      authMode={authMode}
+      authForm={authForm}
+      setAuthForm={setAuthForm}
+      setAuthMode={setAuthMode}
+      setShowAuth={setShowAuth}
+      handleAuth={handleAuth}
+    />
+  )}
 
-      {/* Payment Modal */}
+
+      {/* Payment Modal - Razorpay */}
       {showPayment && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
@@ -1199,56 +996,58 @@ const ResumeScoringSoftware: React.FC = () => {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">
                 Subscribe to {selectedPlan?.name}
               </h3>
-              <p className="text-gray-600">{selectedPlan?.price}</p>
+              <p className="text-3xl font-bold text-blue-600 mb-2">{selectedPlan?.price}</p>
+              <p className="text-gray-600">Secure payment powered by Razorpay</p>
             </div>
 
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Card Number
-                </label>
-                <input
-                  type="text"
-                  placeholder="1234 5678 9012 3456"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Expiry
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="MM/YY"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <h4 className="font-semibold text-blue-900 mb-3">Payment Methods Available:</h4>
+              <div className="grid grid-cols-2 gap-3 text-sm text-blue-800">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  <span>UPI (GPay, PhonePe, Paytm)</span>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    CVC
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="123"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  <span>Credit/Debit Cards</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  <span>Net Banking</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  <span>Wallets</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start space-x-2">
+                <Shield className="h-5 w-5 text-green-600 mt-0.5" />
+                <div className="text-sm text-green-800">
+                  <p className="font-semibold mb-1">100% Secure Payment</p>
+                  <p>Your payment information is encrypted and secure with Razorpay</p>
                 </div>
               </div>
             </div>
 
             <div className="flex space-x-4">
               <button
-                onClick={() => setShowPayment(false)}
+                onClick={() => {
+                  setShowPayment(false);
+                  setSelectedPlan(null);
+                }}
                 className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-200 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={processPayment}
-                className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:from-green-700 hover:to-blue-700 transition-all duration-200"
+                className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:from-green-700 hover:to-blue-700 transition-all duration-200 flex items-center justify-center space-x-2"
               >
-                Subscribe
+                <span>Pay Now</span>
+                <ArrowRight className="h-4 w-4" />
               </button>
             </div>
           </div>

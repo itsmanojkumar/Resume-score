@@ -19,6 +19,9 @@ import hmac
 import hashlib
 from contextlib import asynccontextmanager
 import re
+import uuid
+from dotenv import load_dotenv
+load_dotenv()
 
 # LangChain Gemini imports
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -38,10 +41,11 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 SECRET_KEY = os.getenv("SECRET_KEY", "d4f3e5c6a7b8c9d0e1f2a3b4c5d6e7f890123456789abcdef0123456789abcdef")
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Postgresql@localhost/postgres")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://resumeai_wi80_user:5ao98cyZXg28yuBR21AqLahCC3O7qdkq@dpg-d3f9jhgdl3ps73dej75g-a/resumeai_wi80")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Postgresql@localhost/postgres")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://resumeai_wi80_user:5ao98cyZXg28yuBR21AqLahCC3O7qdkq@dpg-d3f9jhgdl3ps73dej75g-a/resumeai_wi80")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+print("GOOGLE API KEY",GOOGLE_API_KEY)
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 
@@ -95,11 +99,16 @@ app = FastAPI(title="ResumeAI Backend with Gemini & Razorpay", version="2.0.0", 
 # CORS middleware   
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["*"],
-    allow_origins=["https://resume-score-skth.onrender.com"],
+    # allow_origins=["https://resume-score-skth.onrender.com", "http://localhost:5173",],
+    # allow_origins = ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:5173",  # Vite frontend
+        "https://resume-score-skth.onrender.com",
+          # deployed frontend
+    ]
 )
 
 # Security
@@ -119,6 +128,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     analyses = relationship("ResumeAnalysis", back_populates="user")
+    payments = relationship("Payment", back_populates="user")
+    subscriptions = relationship("Subscription", back_populates="user")
 
 
 class ResumeAnalysis(Base):
@@ -127,7 +138,10 @@ class ResumeAnalysis(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     filename = Column(String)
+    job_description = Column(Text, nullable=True)
     overall_score = Column(Float)
+    ats_score = Column(Float, nullable=True)
+    job_match_score = Column(Float, nullable=True)
     category_scores = Column(Text)
     suggestions = Column(Text)
     premium_insights = Column(Text, nullable=True)
@@ -135,6 +149,39 @@ class ResumeAnalysis(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="analyses")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    razorpay_order_id = Column(String, unique=True)
+    razorpay_payment_id = Column(String, unique=True, nullable=True)
+    razorpay_signature = Column(String, nullable=True)
+    amount = Column(Integer)  # Amount in paise
+    currency = Column(String, default="INR")
+    plan_name = Column(String)
+    status = Column(String, default="pending")  # pending, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="payments")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    plan_name = Column(String)
+    status = Column(String, default="active")
+    start_date = Column(DateTime, default=datetime.utcnow)
+    end_date = Column(DateTime, nullable=True)
+    auto_renew = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="subscriptions")
 
 
 # Create tables
@@ -159,25 +206,57 @@ class UserResponse(BaseModel):
     is_premium: bool
     credits_remaining: int
 
-""" class SuggestionItem(BaseModel):
-    area: str
-    description: str
-    priority: str  """
-
 
 class AnalysisResponse(BaseModel):
     id: int
     overall_score: Optional[float] = None
+    ats_score: Optional[float] = None
+    job_match_score: Optional[float] = None
     category_scores: Optional[Dict[str, float]] = None
-    # suggestions: Optional[List[str]] = None
     suggestions: Optional[List[str]] = None  
-
     premium_insights: Optional[List[str]] = None
     processing_status: str
 
 
-class SubscriptionRequest(BaseModel):
-    plan_id: int
+class CreateOrderRequest(BaseModel):
+    plan_name: str
+    amount: int
+    currency: str
+
+
+class CreateOrderResponse(BaseModel):
+    order_id: str
+    amount: int
+    currency: str
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    plan_name: str
+
+
+class VerifyPaymentResponse(BaseModel):
+    success: bool
+    message: str
+    subscription_details: Optional[Dict[str, Any]] = None
+
+
+# Plan configurations
+PLAN_CONFIGS = {
+    "Pro": {
+        "credits": 50,
+        "duration_days": 30,
+        "price": 200  # in rupees
+    },
+    "Enterprise": {
+        "credits": 999,
+        "duration_days": 30,
+        "price": 500  # in rupees
+    }
+}
+
 
 
 # Dependency functions
@@ -252,47 +331,6 @@ async def initialize_ai_agents():
 
 
 # Resume Processor
-'''class LangChainResumeProcessor:
-    def __init__(self):
-        self.analysis_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Analyze the following resume text: {resume_text}. Return JSON."),
-            ("human", "Please analyze this resume.")
-        ])
-        
-        self.scoring_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Provide numerical scores based on analysis: {analysis}. Return JSON."),
-            ("human", "Generate detailed scores.")
-        ])
-        
-        self.suggestions_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Generate 5-7 improvement suggestions. Analysis: {analysis}, Scores: {scores}. Return JSON."),
-            ("human", "What improvements should be made?")
-        ])
-        
-        self.analysis_chain = LLMChain(llm=llm, prompt=self.analysis_prompt)
-        self.scoring_chain = LLMChain(llm=llm, prompt=self.scoring_prompt)
-        self.suggestions_chain = LLMChain(llm=llm, prompt=self.suggestions_prompt)
-    
-    async def process_resume(self, resume_text: str, is_premium: bool = False) -> Dict[str, Any]:
-        try:
-            analysis_result = await self.analysis_chain.arun(resume_text=resume_text)
-            scores_result = await self.scoring_chain.arun(analysis=analysis_result)
-            suggestions_result = await self.suggestions_chain.arun(analysis=analysis_result, scores=scores_result)
-            
-            scores_data = json.loads(scores_result) if scores_result else {}
-            suggestions_data = json.loads(suggestions_result) if suggestions_result else []
-            
-            return {
-                "analysis": analysis_result,
-                "scores": scores_data,
-                "suggestions": suggestions_data
-            }
-        except Exception as e:
-            logger.error(f"Resume processing error: {e}")
-            raise HTTPException(status_code=500, detail="Resume processing failed")   '''
-        
-
-
 class LangChainResumeProcessor:
     def __init__(self):
         self.analysis_prompt = ChatPromptTemplate.from_messages([
@@ -311,32 +349,19 @@ class LangChainResumeProcessor:
         self.scoring_chain = LLMChain(llm=llm, prompt=self.scoring_prompt)
         self.suggestions_chain = LLMChain(llm=llm, prompt=self.suggestions_prompt)
     
-    async def process_resume(self, resume_text: str, is_premium: bool = False) -> Dict[str, Any]:
+    async def process_resume(self, resume_text: str, job_description: Optional[str] = None, is_premium: bool = False) -> Dict[str, Any]:
         try:
             analysis_result = await self.analysis_chain.arun(resume_text=resume_text)
             logger.info(f"[Analysis Output]: {analysis_result}")
-            print("[DEBUG] Analysis Result:", analysis_result)
 
             scores_result = await self.scoring_chain.arun(analysis=analysis_result)
             logger.info(f"[Scores Output]: {scores_result}")
-            print("[DEBUG] Scores Result:", scores_result)
-            logger.debug(f"scores_result raw: {repr(scores_result)}")
-
 
             suggestions_result = await self.suggestions_chain.arun(analysis=analysis_result, scores=scores_result)
             logger.info(f"[Suggestions Output]: {suggestions_result}")
 
-            '''def safe_json_parse(text, fallback):
-                try:
-                    return json.loads(text)
-                except Exception as e:
-                    logger.warning(f"JSON parsing failed: {e}. Text: {text}")
-                    return fallback        '''
-                
-
             def safe_json_parse(text, fallback):
                 try:
-                 # Remove Markdown-style ```json ... ``` if present
                     if text.strip().startswith("```"):
                         text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
                     return json.loads(text)
@@ -345,18 +370,12 @@ class LangChainResumeProcessor:
                     return fallback
 
             scores_data = safe_json_parse(scores_result, {})
-            # suggestions_data = safe_json_parse(suggestions_result, [])
-
+            
             if suggestions_result:
-            # Remove markdown-style code block markers
                 clean_json = re.sub(r"^```json|```$", "", suggestions_result.strip(), flags=re.MULTILINE)
                 suggestions_data = json.loads(clean_json)
             else:
                 suggestions_data = []
-            print("suggestions_data",suggestions_data)
-            print("type of suggestions_data",type(suggestions_data))
-            # scores_data = json.loads(scores_result) if scores_result else {}
-            # suggestions_data = json.loads(suggestions_result) if suggestions_result else []
 
             return {
                 "analysis": analysis_result,
@@ -368,17 +387,13 @@ class LangChainResumeProcessor:
             raise HTTPException(status_code=500, detail="Resume processing failed")
 
 
-
 resume_processor = LangChainResumeProcessor()
 
 
-
 def extract_text_from_pdf(file_content: bytes) -> str:
-    print("[DEBUG] extract_text_from_pdf called")
     try:
         pdf_file = io.BytesIO(file_content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)
-        print(f"Number of pages in PDF: {len(pdf_reader.pages)}")
         return "".join([page.extract_text() for page in pdf_reader.pages])
     except Exception as e:
         logger.error(f"PDF extraction error: {e}")
@@ -386,27 +401,20 @@ def extract_text_from_pdf(file_content: bytes) -> str:
 
 
 # Background task
-async def process_resume_background(analysis_id: int, resume_text: str, is_premium: bool):
+async def process_resume_background(analysis_id: int, resume_text: str, job_description: Optional[str], is_premium: bool):
     db = SessionLocal()
     try:
         analysis = db.query(ResumeAnalysis).filter(ResumeAnalysis.id == analysis_id).first()
         analysis.processing_status = "processing"
         db.commit()
         
-        result = await resume_processor.process_resume(resume_text, is_premium)
-        print("[DEBUG] LangChainResumeProcessor initialized", resume_processor)
-        print(result)
-        print("tyepe of result",type(result))
-        print("analysis all",analysis.overall_score,analysis.category_scores,analysis.suggestions)
-        print("scores",result["scores"])
-
+        result = await resume_processor.process_resume(resume_text, job_description, is_premium)
+        
         resume_scores = result.get("scores", {}).get("resumeScores", {})
-
-        # Assign overall score
+        
         analysis.overall_score = resume_scores.get("overallScore", 0)
-    
-        # analysis.overall_score = result["scores"].get("overall_score", 0)
-        print("analysis.overall score",analysis.overall_score)
+        analysis.ats_score = resume_scores.get("atsScore", 0)
+        analysis.job_match_score = resume_scores.get("jobMatchScore") if job_description else None
         analysis.category_scores = json.dumps(result["scores"].get("category_scores", {}))
         analysis.suggestions = json.dumps(result["suggestions"])
         analysis.processing_status = "completed"
@@ -422,7 +430,8 @@ async def process_resume_background(analysis_id: int, resume_text: str, is_premi
         db.close()
 
 
-# API Endpoints
+# ============= AUTHENTICATION ENDPOINTS =============
+
 @app.post("/auth/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -456,13 +465,28 @@ async def login(login_data: UserLogin, db: Session = Depends(get_db)):
     )}
 
 
-@app.post("/resume/analyze", response_model=AnalysisResponse)
-async def analyze_resume(background_tasks: BackgroundTasks, file: UploadFile = File(...),
-                         user_id: int = Depends(verify_token), db: Session = Depends(get_db)):
-    print("[DEBUG] analyze_resume endpoint called")
+@app.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(user_id: int = Depends(verify_token), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
-    # if not user.is_premium and user.credits_remaining <= 0:
-        # raise HTTPException(status_code=402, detail="No credits remaining.")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse(
+        id=user.id, email=user.email, full_name=user.full_name,
+        is_premium=user.is_premium, credits_remaining=user.credits_remaining
+    )
+
+
+# ============= RESUME ANALYSIS ENDPOINTS =============
+
+@app.post("/resume/analyze", response_model=AnalysisResponse)
+async def analyze_resume(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...),
+    job_description: Optional[str] = None,
+    user_id: int = Depends(verify_token), 
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
     
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF supported")
@@ -472,7 +496,11 @@ async def analyze_resume(background_tasks: BackgroundTasks, file: UploadFile = F
     if not resume_text.strip():
         raise HTTPException(status_code=400, detail="Empty PDF")
     
-    analysis = ResumeAnalysis(user_id=user_id, filename=file.filename)
+    analysis = ResumeAnalysis(
+        user_id=user_id, 
+        filename=file.filename,
+        job_description=job_description
+    )
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
@@ -481,101 +509,260 @@ async def analyze_resume(background_tasks: BackgroundTasks, file: UploadFile = F
         user.credits_remaining -= 1
         db.commit()
     
-    background_tasks.add_task(process_resume_background, analysis.id, resume_text, user.is_premium)
-    print("analysis is",analysis)
-    # print("analysis all",analysis.overall_score,analysis.category_scores,analysis.suggestions)
+    background_tasks.add_task(process_resume_background, analysis.id, resume_text, job_description, user.is_premium)
     
     return AnalysisResponse(id=analysis.id, processing_status="pending")
-    # return AnalysisResponse( processing_status="pending")
-
 
 
 @app.get("/resume/analysis/{analysis_id}", response_model=AnalysisResponse)
 async def get_analysis_result(analysis_id: int, user_id: int = Depends(verify_token), db: Session = Depends(get_db)):
-    analysis = db.query(ResumeAnalysis).filter(ResumeAnalysis.id == analysis_id, ResumeAnalysis.user_id == user_id).first()
-    print("db anlysis",analysis)
+    analysis = db.query(ResumeAnalysis).filter(
+        ResumeAnalysis.id == analysis_id, 
+        ResumeAnalysis.user_id == user_id
+    ).first()
+    
     if not analysis:
         raise HTTPException(status_code=404, detail="Not found")
     
     result = AnalysisResponse(id=analysis.id, processing_status=analysis.processing_status)
-    print(result)
+    
     if analysis.processing_status == "completed":
-        print("result2",result)
         result.overall_score = analysis.overall_score
-        result.category_scores = json.loads(analysis.category_scores)
-
-
-        # suggestions_raw = json.loads(analysis.suggestions)
-        # if isinstance(suggestions_raw, dict) and "improvements" in suggestions_raw:
-            # suggestions_raw = suggestions_raw
-
-        # result.suggestions = [SuggestionItem(**item) for item in suggestions_raw]
-
+        result.ats_score = analysis.ats_score
+        result.job_match_score = analysis.job_match_score
+        result.category_scores = json.loads(analysis.category_scores) if analysis.category_scores else {}
         
         parsed_suggestions = json.loads(analysis.suggestions) if analysis.suggestions else {}
         result.suggestions = parsed_suggestions.get("improvements", [])
-
-        # result.suggestions = json.loads(analysis.suggestions) if analysis.suggestions else []
-        # suggestions_dict = json.loads(analysis.suggestions)
-        # result.suggestions = SuggestionsObject(**suggestions_dict)
+        
         if analysis.premium_insights:
             result.premium_insights = json.loads(analysis.premium_insights)
-    print("manojkumarhi",result)
+    
     return result
 
 
-@app.get("/subscription/plans")
-async def get_subscription_plans():
-    return {"plans": [
-        {"id": 1, "name": "Pro", "price": 999, "credits_per_month": 50},
-        {"id": 2, "name": "Enterprise", "price": 2999, "credits_per_month": 999}
+# ============= PAYMENT ENDPOINTS (RAZORPAY UPI) =============
+
+@app.post("/payment/create-order", response_model=CreateOrderResponse)
+async def create_payment_order(
+    request: CreateOrderRequest,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+
+):
+    """Create a Razorpay order for subscription payment"""
+    try:
+        
+        print("hI WILL PRITN API KEYS",os.getenv("RAZORPAY_KEY_ID"))
+        print(os.getenv("RAZORPAY_KEY_SECRET"))
+        # print("📩 Received JSON:", body)
+
+        print("🧠 user_id from token:", user_id)
+        # Validate plan
+        if request.plan_name not in PLAN_CONFIGS:
+            raise HTTPException(status_code=400, detail="Invalid plan name")
+        
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        
+        # Create Razorpay order
+        order_data = {
+            "amount": int(request.amount)*100,  # Amount in paise
+            "currency": request.currency,
+            "payment_capture": 1,
+            "receipt": f"receipt_{uuid.uuid4().hex[:10]}",   
+            "notes": {
+                "user_id": user.id,
+                "plan_name": request.plan_name,
+                "email": user.email
+            }
+        }
+        
+        razorpay_order = razorpay_client.order.create(data=order_data)
+        
+        # Save payment record in database
+        payment = Payment(
+            user_id=user.id,
+            razorpay_order_id=razorpay_order["id"],
+            amount=request.amount,
+            currency="INR",
+            plan_name=request.plan_name,
+            status="pending"
+        )
+        db.add(payment)
+        db.commit()
+        
+        logger.info(f"Order created: {razorpay_order['id']} for user {user.email}")
+        
+        return CreateOrderResponse(
+            order_id=razorpay_order["id"],
+            amount=razorpay_order["amount"],
+            currency=razorpay_order["currency"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create order: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create order: {str(e)}")
+
+
+@app.post("/payment/verify", response_model=VerifyPaymentResponse)
+async def verify_payment(
+    request: VerifyPaymentRequest,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    """Verify Razorpay payment and activate subscription"""
+    try:
+        # Get payment record
+        payment = db.query(Payment).filter(
+            Payment.razorpay_order_id == request.razorpay_order_id,
+            Payment.user_id == user_id
+        ).first()
+        
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment record not found")
+        
+        # Verify signature
+        generated_signature = hmac.new(
+            RAZORPAY_KEY_SECRET.encode(),
+            f"{request.razorpay_order_id}|{request.razorpay_payment_id}".encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if generated_signature != request.razorpay_signature:
+            payment.status = "failed"
+            db.commit()
+            logger.warning(f"Invalid signature for order {request.razorpay_order_id}")
+            raise HTTPException(status_code=400, detail="Invalid payment signature")
+        
+        # Payment verified successfully
+        payment.razorpay_payment_id = request.razorpay_payment_id
+        payment.razorpay_signature = request.razorpay_signature
+        payment.status = "completed"
+        
+        # Get plan configuration
+        plan_config = PLAN_CONFIGS.get(request.plan_name)
+        if not plan_config:
+            raise HTTPException(status_code=400, detail="Invalid plan")
+        
+        # Get user
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        # Update user to premium
+        user.is_premium = True
+        user.credits_remaining = plan_config["credits"]
+        
+        # Create subscription record
+        subscription = Subscription(
+            user_id=user.id,
+            plan_name=request.plan_name,
+            status="active",
+            start_date=datetime.utcnow(),
+            end_date=datetime.utcnow() + timedelta(days=plan_config["duration_days"]),
+            auto_renew=True
+        )
+        db.add(subscription)
+        
+        db.commit()
+        db.refresh(subscription)
+        
+        logger.info(f"Payment verified for user {user.email}, plan: {request.plan_name}")
+        
+        return VerifyPaymentResponse(
+            success=True,
+            message="Payment verified and subscription activated successfully",
+            subscription_details={
+                "plan_name": subscription.plan_name,
+                "start_date": subscription.start_date.isoformat(),
+                "end_date": subscription.end_date.isoformat() if subscription.end_date else None,
+                "credits": user.credits_remaining
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Payment verification failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Payment verification failed: {str(e)}")
+
+
+@app.get("/payment/history")
+async def get_payment_history(
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    """Get user's payment history"""
+    payments = db.query(Payment).filter(
+        Payment.user_id == user_id
+    ).order_by(Payment.created_at.desc()).all()
+    
+    return {"payments": [
+        {
+            "id": p.id,
+            "order_id": p.razorpay_order_id,
+            "payment_id": p.razorpay_payment_id,
+            "amount": p.amount / 100,  # Convert paise to rupees
+            "currency": p.currency,
+            "plan_name": p.plan_name,
+            "status": p.status,
+            "created_at": p.created_at.isoformat()
+        }
+        for p in payments
     ]}
 
 
-@app.post("/subscription/subscribe")
-async def subscribe_to_plan(subscription_data: SubscriptionRequest,
-                            user_id: int = Depends(verify_token), db: Session = Depends(get_db)):
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        amount = 999 if subscription_data.plan_id == 1 else 2999
-        order = razorpay_client.order.create({"amount": amount, "currency": "INR", "payment_capture": "1"})
-        user.subscription_id = order["id"]
-        db.commit()
-        return {"status": "created", "order_id": order["id"]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@app.get("/subscription/current")
+async def get_current_subscription(
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    """Get user's current active subscription"""
+    subscription = db.query(Subscription).filter(
+        Subscription.user_id == user_id,
+        Subscription.status == "active"
+    ).order_by(Subscription.created_at.desc()).first()
+    
+    if not subscription:
+        return {"message": "No active subscription"}
+    
+    return {
+        "id": subscription.id,
+        "plan_name": subscription.plan_name,
+        "status": subscription.status,
+        "start_date": subscription.start_date.isoformat(),
+        "end_date": subscription.end_date.isoformat() if subscription.end_date else None,
+        "auto_renew": subscription.auto_renew
+    }
 
 
-@app.post("/payment/webhook")
-async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
-    body = await request.body()
-    signature = request.headers.get("X-Razorpay-Signature")
-    try:
-        generated_sig = hmac.new(RAZORPAY_KEY_SECRET.encode(), body, hashlib.sha256).hexdigest()
-        if generated_sig != signature:
-            raise HTTPException(status_code=400, detail="Invalid signature")
-        
-        payload = await request.json()
-        order_id = payload.get("payload", {}).get("payment", {}).get("entity", {}).get("order_id")
-        if order_id:
-            user = db.query(User).filter(User.subscription_id == order_id).first()
-            if user:
-                user.is_premium = True
-                user.credits_remaining = 50 if "pro" in order_id else 999
-                db.commit()
-        return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        raise HTTPException(status_code=400, detail="Webhook handling failed")
-
+# ============= HEALTH CHECK =============
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "ai_agents": "initialized"}
+    return {
+        "status": "healthy", 
+        "ai_agents": "initialized",
+        "razorpay": "configured"
+    }
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "ResumeAI API with Razorpay UPI Integration",
+        "version": "2.0.0",
+        "endpoints": {
+            "auth": "/auth/register, /auth/login, /auth/me",
+            "resume": "/resume/analyze, /resume/analysis/{id}",
+            "payment": "/payment/create-order, /payment/verify, /payment/history",
+            "subscription": "/subscription/current"
+        }
+    }
 
 
 if __name__ == "__main__":
     import uvicorn
-    # uvicorn.run(app, host="0.0.0.0", port=8000)
-    port = int(os.environ.get("PORT", 8000))  # Render provides PORT dynamically
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
