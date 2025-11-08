@@ -109,8 +109,9 @@ const ResumeScoringSoftware: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // API base URL and Razorpay Key
-  // const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
-  const API_BASE: string ='http://localhost:8000';
+  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+  // const API_BASE: string ='http://localhost:8000';
+
   const RAZORPAY_KEY: string = import.meta.env.VITE_RAZORPAY_KEY_ID; // Replace with your actual Razorpay key
 
   // Load Razorpay script and user data
