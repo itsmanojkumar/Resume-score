@@ -109,8 +109,8 @@ const ResumeScoringSoftware: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // API base URL and Razorpay Key
-  const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
-  // const API_BASE: string ='http://localhost:8000';
+  // const API_BASE: string = 'https://resume-score-backend-22r4.onrender.com';
+  const API_BASE: string ='http://localhost:8000';
 
   const RAZORPAY_KEY: string = import.meta.env.VITE_RAZORPAY_KEY_ID; // Replace with your actual Razorpay key
 
@@ -129,7 +129,7 @@ const ResumeScoringSoftware: React.FC = () => {
         document.body.removeChild(script);
       }
     };
-  }, []);
+  }, []); 
 
   const fetchUserData = async (token: string): Promise<void> => {
     try {
@@ -855,7 +855,7 @@ const ResumeScoringSoftware: React.FC = () => {
                     <div key={index} className="flex items-start space-x-3 p-4 bg-blue-50 rounded-lg">
                       <ArrowRight className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
                       <div>
-                        <div className="font-semibold text-gray-900">{suggestion.area}</div>
+                         <div className="font-semibold text-gray-900">{suggestion.area}</div>
                         <div className="text-gray-700">{suggestion.description}</div>
                         <div className="text-blue-600 text-sm mt-1">{suggestion.action}</div>
                       </div>

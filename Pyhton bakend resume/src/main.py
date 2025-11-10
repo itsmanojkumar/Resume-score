@@ -69,7 +69,7 @@ config_list = [
 
 # LangChain Gemini setup
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-2.0-flash",
     temperature=0.1,
     google_api_key=GOOGLE_API_KEY,
     convert_system_message_to_human=True 
@@ -105,8 +105,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_origins=[
-        "http://localhost:5173",  # Vite frontend
-        "https://resume-score-skth.onrender.com",
+        "http://localhost:5173", # Vite frontend
+        # "https://resume-score-skth.onrender.com",
+        # "*"
           # deployed frontend
     ]
 )
@@ -123,7 +124,7 @@ class User(Base):
     hashed_password = Column(String)
     full_name = Column(String)
     is_premium = Column(Boolean, default=False)
-    credits_remaining = Column(Integer, default=2)
+    credits_remaining = Column(Integer, default=10)
     subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -205,7 +206,7 @@ class UserResponse(BaseModel):
     full_name: str
     is_premium: bool
     credits_remaining: int
-
+'''
 
 class AnalysisResponse(BaseModel):
     id: int
@@ -216,7 +217,21 @@ class AnalysisResponse(BaseModel):
     suggestions: Optional[List[str]] = None  
     premium_insights: Optional[List[str]] = None
     processing_status: str
+'''
+class SuggestionItem(BaseModel):
+    area: str
+    description: str
+    action: str
 
+class AnalysisResponse(BaseModel):
+    id: int
+    overall_score: Optional[float] = None
+    ats_score: Optional[float] = None
+    job_match_score: Optional[float] = None
+    category_scores: Optional[Dict[str, float]] = None
+    suggestions: Optional[List[Dict[str, Any]]] = None 
+    premium_insights: Optional[List[str]] = None
+    processing_status: str
 
 class CreateOrderRequest(BaseModel):
     plan_name: str
@@ -398,8 +413,7 @@ def extract_text_from_pdf(file_content: bytes) -> str:
     except Exception as e:
         logger.error(f"PDF extraction error: {e}")
         return ""
-
-
+"""
 # Background task
 async def process_resume_background(analysis_id: int, resume_text: str, job_description: Optional[str], is_premium: bool):
     db = SessionLocal()
@@ -427,7 +441,136 @@ async def process_resume_background(analysis_id: int, resume_text: str, job_desc
             analysis.processing_status = "failed"
             db.commit()
     finally:
+        db.close()    
+
+# Background task
+"""
+# ✅ Corrected Background Task
+# ✅ Corrected and Scaled Background Task
+# ✅ Final Version – Scaled and Robust Background Task
+async def process_resume_background(
+    analysis_id: int,
+    resume_text: str,
+    job_description: Optional[str],
+    is_premium: bool
+):
+    db = SessionLocal()
+    try:
+        # Fetch analysis record
+        analysis = db.query(ResumeAnalysis).filter(ResumeAnalysis.id == analysis_id).first()
+        if not analysis:
+            logger.error(f"❌ Analysis ID {analysis_id} not found.")
+            return
+
+        analysis.processing_status = "processing"
+        db.commit()
+
+        # Run Gemini Processor
+        result = await resume_processor.process_resume(resume_text, job_description, is_premium)
+        logger.info(f"🧠 RESULT RECEIVED FROM PROCESSOR: {result}")
+
+        scores_data = result.get("scores", {})
+
+        # ✅ Normalization helper (convert 0–10 → 0–100)
+        def normalize(value: Any) -> float:
+            try:
+                val = float(value)
+                return round(val * 10, 1) if val <= 10 else round(val, 1)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # ✅ Extract key scores safely
+        overall = normalize(
+            scores_data.get("resume_score")
+            or scores_data.get("overall_score")
+            or scores_data.get("overallScore")
+            or 0
+        )
+        ats = normalize(
+            scores_data.get("ats_score")
+            or scores_data.get("accuracy_score")
+            or scores_data.get("atsScore")
+            or overall * 0.9  # fallback heuristic
+        )
+        job_match = normalize(
+            scores_data.get("job_match_score")
+            or scores_data.get("experience_relevance_score")
+            or scores_data.get("alignment_score")
+            or overall * 0.8  # fallback heuristic
+        )
+
+        # ✅ Dynamically detect numeric sub-scores for category averaging
+        category_map = {
+            "formatting": ["formatting_score", "accuracy_score", "clarity_score"],
+            "content": ["project_details_score", "summary_score", "content_quality"],
+            "keywords": ["keyword_relevance", "quantification_score", "ats_keyword_match"],
+            "experience": ["experience_relevance_score", "impact_score", "timeline_consistency"],
+            "skills": ["skills_relevance_score", "certification_strength", "tech_stack_score"],
+        }
+
+        def average(keys):
+            vals = [normalize(scores_data.get(k, 0)) for k in keys if k in scores_data]
+            return round(sum(vals) / len(vals), 1) if vals else 0.0
+
+        category_scores = {cat: average(keys) for cat, keys in category_map.items()}
+        analysis.category_scores = json.dumps(category_scores)
+
+        # ✅ Weighted overall score from categories (more realistic)
+        weights = {"formatting": 0.15, "content": 0.25, "keywords": 0.2, "experience": 0.25, "skills": 0.15}
+        weighted_overall = round(sum(category_scores[k] * w for k, w in weights.items()), 1)
+        if weighted_overall > 0:
+            overall = weighted_overall
+
+        # ✅ Save normalized & weighted scores
+        analysis.overall_score = overall
+        analysis.ats_score = ats
+        analysis.job_match_score = job_match
+
+        # ✅ Normalize suggestions
+        raw_suggestions = result.get("suggestions", [])
+        normalized_suggestions = [
+            {
+                "area": s.get("area", "General"),
+                "description": (
+                    s.get("reasoning")
+                    or s.get("reason")
+                    or s.get("rationale")
+                    or "No description provided"
+                ),
+                "action": (
+                    s.get("improvement")
+                    or s.get("recommendation")
+                    or "No action provided"
+                ),
+            }
+            for s in raw_suggestions
+        ]
+        analysis.suggestions = json.dumps(normalized_suggestions)
+
+        # ✅ Add Premium Insights if applicable
+        if is_premium:
+            analysis.premium_insights = json.dumps([
+                "Quantify achievements with metrics.",
+                "Add leadership and impact examples.",
+                "Highlight key skills that match the job posting."
+            ])
+
+        analysis.processing_status = "completed"
+        db.commit()
+
+        logger.info(
+            f"✅ Analysis {analysis_id} saved | overall={overall} ats={ats} job_match={job_match} | categories={category_scores}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error in process_resume_background: {e}")
+        if "analysis" in locals():
+            analysis.processing_status = "failed"
+            db.commit()
+    finally:
         db.close()
+
+
 
 
 # ============= AUTHENTICATION ENDPOINTS =============
@@ -506,39 +649,55 @@ async def analyze_resume(
     db.refresh(analysis)
     
     if not user.is_premium:
-        user.credits_remaining -= 1
+        user.credits_remaining += 1
         db.commit()
     
     background_tasks.add_task(process_resume_background, analysis.id, resume_text, job_description, user.is_premium)
     
     return AnalysisResponse(id=analysis.id, processing_status="pending")
 
-
+''''''
 @app.get("/resume/analysis/{analysis_id}", response_model=AnalysisResponse)
-async def get_analysis_result(analysis_id: int, user_id: int = Depends(verify_token), db: Session = Depends(get_db)):
+async def get_analysis_result(
+    analysis_id: int,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     analysis = db.query(ResumeAnalysis).filter(
-        ResumeAnalysis.id == analysis_id, 
+        ResumeAnalysis.id == analysis_id,
         ResumeAnalysis.user_id == user_id
     ).first()
-    
+
     if not analysis:
         raise HTTPException(status_code=404, detail="Not found")
-    
+
     result = AnalysisResponse(id=analysis.id, processing_status=analysis.processing_status)
-    
+
     if analysis.processing_status == "completed":
         result.overall_score = analysis.overall_score
         result.ats_score = analysis.ats_score
         result.job_match_score = analysis.job_match_score
         result.category_scores = json.loads(analysis.category_scores) if analysis.category_scores else {}
-        
-        parsed_suggestions = json.loads(analysis.suggestions) if analysis.suggestions else {}
-        result.suggestions = parsed_suggestions.get("improvements", [])
-        
+
+        # ✅ Parse suggestions safely
+        parsed_suggestions = json.loads(analysis.suggestions) if analysis.suggestions else []
+        normalized_suggestions = [
+            {
+                "area": item.get("area", "General"),
+                "description": item.get("description", "No description provided"),
+                "action": item.get("action", "No action provided")
+            }
+            for item in parsed_suggestions
+        ]
+        result.suggestions = normalized_suggestions
+
         if analysis.premium_insights:
             result.premium_insights = json.loads(analysis.premium_insights)
-    
+
+    logger.info(f"RESULT {result}")
     return result
+
+
 
 
 # ============= PAYMENT ENDPOINTS (RAZORPAY UPI) =============
