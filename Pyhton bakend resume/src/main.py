@@ -105,9 +105,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_origins=[
-        "http://localhost:5173", # Vite frontend
+        "https://resume-score-murex.vercel.app",
+        # "http://localhost:5173", # Vite frontend,
         # "https://resume-score-skth.onrender.com",
-        # "*"
+        # "*",
           # deployed frontend
     ]
 )
