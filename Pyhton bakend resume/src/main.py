@@ -41,8 +41,9 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 SECRET_KEY = os.getenv("SECRET_KEY", "d4f3e5c6a7b8c9d0e1f2a3b4c5d6e7f890123456789abcdef0123456789abcdef")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Postgresql@localhost/postgres")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Postgresql@localhost/postgres")
 # DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://resumeai_wi80_user:5ao98cyZXg28yuBR21AqLahCC3O7qdkq@dpg-d3f9jhgdl3ps73dej75g-a/resumeai_wi80")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_miIjQZ4KXO7D@ep-late-cherry-a10mtxze-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 print("GOOGLE API KEY",GOOGLE_API_KEY)
